@@ -158,6 +158,9 @@ database_sample <-
     ungroup() %>%
     arrange(baby_id, birthday, timepoint)
 
-database_sample %>% write_rds("data-clean/database_sample.rds")
+database_sample %>% 
+  write_rds(here("data-clean",
+                 "database_sample.rds"))
+
 ```
 

@@ -1,0 +1,163 @@
+---
+title: "clean-database"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(here)
+```
+
+```{r}
+samples_long <- 
+    read_csv(here("data-raw","samples.csv")) %>% 
+    gather(sample, baby_id)
+
+app1_sample <- 
+    read_csv(here("data-raw","app1.csv")) %>% 
+    filter(baby_id %in% samples_long$baby_id)
+
+app2_sample <- 
+    read_csv(here("data-raw","app2.csv")) %>% 
+    filter(baby_id %in% samples_long$baby_id)
+
+app3_sample <- 
+    read_csv(here("data-raw","app3.csv")) %>% 
+    filter(baby_id %in% samples_long$baby_id)
+
+app4_sample <- 
+    read_csv(here("data-raw","app4.csv")) %>% 
+    filter(baby_id %in% samples_long$baby_id)
+
+app5_sample <- 
+    read_csv(here("data-raw","app5.csv")) %>% 
+    filter(baby_id %in% samples_long$baby_id)
+
+assessment_answers <- 
+    bind_rows(
+        app1_sample,
+        app2_sample,
+        app3_sample,
+        app4_sample,
+        app5_sample
+    )
+
+babies <- 
+    read_csv(here("data-raw","babies.csv")) %>% 
+    rename(baby_id = id) %>%
+    semi_join(assessment_answers, by = "baby_id")
+```
+
+rename columns
+
+```{r}
+assessment_answers <-
+    assessment_answers %>%
+    select(updated_at, milestone_id, baby_id, 
+           answer, baby_age, update_count, created_at) %>%
+    mutate(updated_at = ymd_hms(updated_at), created_at = ymd_hms(created_at))
+```
+
+need to split up responses that are in the same row because updated != created
+
+```{r}
+f <- function(mile){
+        tmp <-
+            mile %>%
+            select(baby_id, milestone_id, age_mile = baby_age, answer, updated_n = update_count, updated = updated_at, created = created_at) %>%
+            mutate(days = as.numeric(updated - created) / 86400)
+
+        bind_rows(
+            tmp[tmp$days < 1, ] %>% select(-updated_n, -updated, -days) %>% rename(date = created),
+            tmp[tmp$days >= 1, ] %>% select(-updated_n, -updated, -days) %>% rename(date = created),
+            tmp[tmp$days >= 1, ] %>% select(-updated_n, -created, -days) %>% rename(date = updated)
+        ) %>%
+            group_by(milestone_id, date) %>%
+            filter(answer == max(answer)) %>%
+            slice(1) %>%
+            ungroup() %>%
+            arrange(date, milestone_id)
+    }
+```
+
+now do the back and forth filtering to create timepoints properly
+
+```{r}
+assessment_answers2 <-
+    assessment_answers %>%
+    split(.$baby_id) %>%
+    map_df(f)
+
+assessment_answers_small <-
+    assessment_answers2 %>%
+    mutate(timepoint = cumsum(replace_na(as.numeric(date - lag(date)), 0) > 259200) + 1) %>%
+    ungroup()
+
+get_timepoints <- function(assessment_answers){
+    assessment_answers %>%
+        group_by(baby_id, timepoint) %>%
+        summarize(
+            min_date = min(date),
+            max_date = max(date),
+            n_from_milestone = n_distinct(milestone_id),
+            n = n(),
+            p = mean(answer)
+        ) %>%
+        ungroup() %>%
+        mutate(days = as.numeric(max_date - min_date) / 86400)
+}
+
+timepoints_of_interest <- 
+    assessment_answers_small %>% 
+    get_timepoints() %>% 
+    filter(n_from_milestone >= 10, days <= 5)
+
+assessment_answers_small_timepoints_of_interest <-
+    assessment_answers_small %>%
+    semi_join(timepoints_of_interest) %>%
+    group_by(baby_id) %>%
+    mutate(timepoint = cumsum(replace_na(as.numeric(date - lag(date)), 0) > 259200) + 1) %>%
+    ungroup() %>%
+    group_by(baby_id, milestone_id, timepoint) %>%
+    filter(answer == max(answer)) %>%
+    slice(1) %>%
+    ungroup() %>%
+    arrange(baby_id, date, milestone_id)
+
+timepoints_of_interest_again <- assessment_answers_small_timepoints_of_interest %>% get_timepoints()
+
+assessment_answers_small_timepoints_of_interest2 <-
+    assessment_answers_small_timepoints_of_interest %>%
+    left_join(timepoints_of_interest_again %>% select(baby_id, timepoint, min_date, max_date))
+```
+
+widen for irt modeling then output 
+
+```{r}
+wide <-
+    assessment_answers_small_timepoints_of_interest2 %>%
+    select(baby_id, timepoint, min_date, max_date, milestone_id, answer) %>%
+    spread(milestone_id, answer) %>%
+    group_by(baby_id) %>%
+    filter(n() >= 6) %>%
+    ungroup()
+
+database_sample <-
+    wide %>%
+    left_join(babies %>% select(baby_id, birthday) %>% mutate(birthday = ymd(birthday))) %>%
+    mutate(
+        min_date = as_date(min_date),
+        max_date = as_date(max_date),
+        min_days = as.numeric(min_date - birthday),
+        max_days = as.numeric(min_date - birthday)
+    ) %>%
+    select(baby_id, birthday, timepoint, min_days, max_days, min_date, max_date, everything()) %>%
+    group_by(baby_id) %>%
+    filter(all(min_days > 0)) %>%
+    ungroup() %>%
+    arrange(baby_id, birthday, timepoint)
+
+database_sample %>% write_rds("data-clean/database_sample.rds")
+```
+

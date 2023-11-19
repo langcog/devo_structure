@@ -1,0 +1,134 @@
+---
+title: "7-full-models-no-cv"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(modelr)
+library(mirt)
+set.seed(1)
+source("study1/R/understand_model.R")
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+resp <- survey %>% filter(age >= 2) %>% select(-age)
+```
+
+priors 
+
+```{r}
+prior1 <-
+        "F1 = 1-414
+        PRIOR =
+        (1-414, d, norm, 0, 3)"
+
+prior2 <-
+        "F1 = 1-414
+        F2 = 1-414
+        PRIOR =
+        (1-414, d, norm, 0, 3)"
+
+prior3 <-
+        "F1 = 1-414
+        F2 = 1-414
+        F3 = 1-414
+        PRIOR =
+        (1-414, d, norm, 0, 3)"
+
+prior4 <-
+        "F1 = 1-414
+        F2 = 1-414
+        F3 = 1-414
+        F4 = 1-414
+        PRIOR =
+        (1-414, d, norm, 0, 3)"
+
+prior5 <-
+        "F1 = 1-414
+        F2 = 1-414
+        F3 = 1-414
+        F4 = 1-414
+        F5 = 1-414
+        PRIOR =
+        (1-414, d, norm, 0, 3)"
+```
+
+models 
+
+```{r}
+mod1 <-
+    mirt(
+        resp,
+        mirt.model(prior1),
+        method = "EM"
+    )
+mod1@Options$exploratory <- TRUE
+
+mod2 <-
+    mirt(
+        resp,
+        mirt.model(prior2),
+        method = "EM"
+    )
+mod2@Options$exploratory <- TRUE
+
+mod3 <-
+    mirt(
+        resp,
+        mirt.model(prior3),
+        method = "QMCEM"
+    )
+mod3@Options$exploratory <- TRUE
+
+mod4 <-
+    mirt(
+        resp,
+        mirt.model(prior4),
+        method = "QMCEM"
+    )
+mod4@Options$exploratory <- TRUE
+
+mod5 <-
+    mirt(
+        resp,
+        mirt.model(prior5),
+        method = "QMCEM"
+    )
+mod5@Options$exploratory <- TRUE
+```
+
+extract proportion of variance
+
+```{r}
+propvar <- 
+  tibble(
+    Model = c("1f w/ prior", "2f w/ prior", "3f w/ prior", "4f w/ prior", "5f w/ prior"),
+    `Proportion of Variance` = c(understand_model(mod1, "none")$propvar[2], understand_model(mod2, "none")$propvar[3], understand_model(mod3, "none")$propvar[4], understand_model(mod4, "none")$propvar[5], understand_model(mod5, "none")$propvar[6])
+  )
+
+propvar %>% write_rds("data-for-paper/study1-full-results-propvar.rds")
+```
+
+extract discriminations
+
+```{r}
+data <- 
+    bind_rows(
+    loadings_none(mod1, "1F") %>% gather(var, val, -short, -model),
+    loadings(mod2, "2F") %>% rename(a2 = a1, a1 = a2) %>% gather(var, val, -short, -model),
+    loadings(mod3, "3F") %>% rename(a1 = a2, a3 = a1, a2 = a3) %>% gather(var, val, -short, -model),
+    loadings(mod4, "4F") %>% rename(a1 = a3, a2 = a4, a3 = a1, a4 = a2) %>% gather(var, val, -short, -model),
+    loadings(mod5, "5F") %>% rename(a2 = a5, a5 = a2) %>% gather(var, val, -short, -model)
+) %>% 
+    left_join(milestones) 
+
+data %>% 
+  select(-start, -name) %>% 
+  write_rds("data-for-paper/study1-full-models-no-cv-discriminations.rds")
+```

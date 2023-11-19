@@ -1,0 +1,75 @@
+---
+title: "two replicates"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(modelr)
+library(mirt)
+library(lubridate)
+set.seed(1)
+source("study2/model-functions.R")
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+surv_mod_2f <- read_rds("study2/data/surv_mod_2f.rds")
+samples <- read_csv("data-raw/samples.csv")
+app_data <- read_rds("data-clean/database-timepoints-2-to-18mo-5-each-cat-6tp.rds")
+```
+
+building function
+
+```{r}
+batch_babies <- samples$exploratory
+
+batch <- 
+    app_data %>% 
+    filter(baby_id %in% batch_babies)
+
+scores <- 
+    fscores(
+        surv_mod_2f,
+        method = "EAP",
+        response.pattern = select(batch, -(1:7)),
+        rotate = "oblimin"
+    )[ , c("F1", "F2")] %>% 
+    as_tibble()
+
+final <- 
+    select(batch, 1:7) %>% 
+    mutate(months = min_days / 30.3) %>% 
+    select(baby_id, timepoint, months) %>% 
+    bind_cols(scores %>% select(F1 = F2, F2 = F1)) # F2 explains more variance so swap names
+
+ages <- final %>% select(1:3)
+fscores_est <- final %>% select(F1_est = F1, F2_est = F2)
+
+fscores <-
+    fscores_est %>%
+    bind_cols(ages, .) %>%
+    split(.$baby_id) %>%
+    map_df(one_baby_resids)
+
+fscores %>% 
+    ggplot(aes(x = F1_resid, y = F2_resid)) + 
+    geom_point() +
+    geom_hline(yintercept = 1.5) +
+    geom_hline(yintercept = -1.5) +
+    geom_vline(xintercept = -1.5) +
+    geom_vline(xintercept = 1.5)
+
+fscores <- 
+    fscores %>% 
+    filter(abs(F1_resid) < 1.5, abs(F2_resid) < 1.5)
+
+models <- nilam_method(fscores)
+
+models
+```

@@ -1,0 +1,469 @@
+
+```{r}
+# https://www.pnas.org/authors/submitting-your-manuscript
+# Small: approximately 9 cm x 6 cm
+# Medium: approximately 11 cm x 11 cm
+# Large: approximately 18 cm x 22 cm
+
+library(tidyverse)
+library(cowplot)
+library(grid)
+library(quantregGrowth)
+library(here)
+```
+
+# Figure 1
+
+```{r}
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+resp <- select(survey, -age)
+
+by_age <- 
+  survey %>% 
+  filter(age > 1) %>% 
+  mutate(baby_id = row_number()) %>% 
+  gather(var, val, -baby_id, -age) %>% 
+  group_by(id = baby_id, age) %>% 
+  summarize(response = sum(val)) %>% 
+  ungroup()
+
+source("study1/R/predictQR_fixed.R")
+
+taus <-  c(0.1, 0.25, 0.5, 0.75, 0.9)
+
+model_perc_curves <- gcrq(response ~ ps(age, monotone = 1, lambda = 1000), taus, by_age)
+
+preds <- 
+  bind_cols(by_age, as_tibble(predict(model_perc_curves))) %>% 
+  group_by(age) %>% 
+  slice(1) %>% 
+  ungroup() %>% 
+  select(-id, -response) %>% 
+  gather(Percentile, pred, starts_with("0")) %>% 
+  mutate(Percentile = as.character(as.numeric(Percentile) * 100))
+
+p <- 
+    by_age %>% 
+	ggplot(aes(x = age, y = response)) + 
+	geom_point(size = 1, alpha = .1, fill = "black", color = "black", shape = 16) + 
+	geom_line(data = preds, aes(x = age, y = pred, col = Percentile, group = Percentile)) + 
+	ylim(0,nrow(milestones)) + 
+	ylab("Milestones completed") + 
+	xlab("Age (in months)") + 
+	langcog::theme_mikabr(base_size = 10) + 
+    langcog::scale_color_solarized() +
+	theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = c(0, 12, 24, 36, 48, 55, 60)) +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+  
+ggsave(filename = "_paper/figures/01_achieve_by_age.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+# Table 1
+
+```{r}
+read_rds("data-for-paper/study1-full-results-propvar.rds")
+read_rds("data-for-paper/study1-full-results-overall.rds")
+```
+
+# Figure 2
+
+```{r}
+discriminations <- 
+    read_rds("data-for-paper/study1-full-models-no-cv-discriminations.rds") %>% 
+    mutate(model = paste0(model, " model")) %>% 
+    mutate(var = paste0("Factor ", parse_number(var)))
+
+p <- 
+    discriminations %>% 
+    ggplot(aes(x = val, fill = area)) +
+    ggridges::geom_density_line(alpha = 0.6, size = 0.01) +
+    facet_grid(var ~ model, scales = "free_y") +
+    coord_cartesian(xlim = c(-2, 8)) +
+    # geom_vline(
+    #     data = filter(discriminations, paste == "crawl_17"),
+    #     aes(xintercept = val),
+    #     color = "#268bd2",
+    #     alpha = 0.5
+    # ) +
+    # 
+    # geom_vline(
+    #     data = filter(discriminations, paste == "words_375"),
+    #     aes(xintercept = val),
+    #     color = "green",
+    #     alpha = 0.5
+    # ) +
+    labs(x = "Discrimination", fill = "Milestone Category") + 
+    langcog::theme_mikabr(base_size = 10) + 
+    langcog::scale_color_solarized() +
+    theme(legend.position = "none") +
+    theme(legend.position = c(unit(0.1, "npc"), unit(0.2, "npc"))) + 
+    theme(axis.title.y=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.y=element_blank()) +
+    scale_x_continuous(breaks = c(-2, 0, 2, 4, 6, 8))
+
+rect1 <- rectGrob(
+  x = unit(0.1, "npc"),
+  y = unit(0.63, "npc"),
+  width = unit(0.2, "npc"),
+  height = unit(0.2, "npc"),
+  # hjust = 0.5, vjust = 0.5,
+  gp = gpar(fill = "white", alpha = 1, lex = 0)
+)
+
+rect2 <- rectGrob(
+  x = unit(0.5, "npc"),
+  y = unit(0.1, "npc"),
+  width = unit(0.52, "npc"),
+  height = unit(0.1, "npc"),
+  # hjust = 0.5, vjust = 0.5,
+  gp = gpar(fill = "white", alpha = 1, lex = 0)
+)
+
+out <- 
+    ggdraw(p) +
+    # draw_grob(rect1) +
+    # draw_grob(rect2) +
+    # draw_label("-2", size = 11, fontfamily = "Open Sans",x = 0.786 - 0.19 * 4, y = 0.72, color = "black", alpha = 0.9) +
+    # draw_line(x = c(0.786 - 0.19 * 4, 0.786 - 0.19 * 4), y = c(0.735, 0.743)) +
+    # draw_line(x = c(0.085, 0.085), y = c(0.88, 0.91), color = "blue") + 
+    # draw_line(x = c(0.085, 0.09), y = c(0.88, 0.89), color = "blue") +
+    # draw_line(x = c(0.085, 0.08), y = c(0.88, 0.89), color = "blue") +
+    # draw_line(x = c(0.11, 0.11), y = c(0.88, 0.91), color = "green") + 
+    # draw_line(x = c(0.11, 0.115), y = c(0.88, 0.89), color = "green") +
+    # draw_line(x = c(0.11, 0.105), y = c(0.88, 0.89), color = "green")
+
+ggsave(filename = "_paper/figures/models_new.png", out, width = 18, height = 9, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+# Figure 3
+
+```{r}
+gain <- function(flex_acc, base_acc){(flex_acc - base_acc) / (1 - base_acc)}
+
+cols <-
+        c(
+            "5F" = "#FF9900",
+            "4F" = "#FF0000",
+            "3F" = "#CC00FF",
+            "2F" = "#3300FF"
+            # "1f" = "#0099FF",
+            # "Rasch" = "black",
+            # "Milestone Age" = "#33CC00",
+            # "Naive" = "darkgray"
+        )
+
+full_results_by_partition <- 
+    read_rds("data-for-paper/study1-full-results-by-partition.rds") %>% 
+    mutate_at(vars(`2f w/ prior`:`5f w/ prior`), ~ gain(., `1f w/ prior`)) %>% 
+    select(-`1f w/ prior`) %>% 
+    gather(Model, val, -age_bucket_xaxis) %>% 
+    mutate(Model = str_replace(Model, "f w/ prior", "F")) %>% 
+    mutate(label = "Full models")
+
+partition_results <- 
+    read_rds("data-for-paper/study1-partition-results.rds") %>% 
+    select(age_bucket_xaxis = name, `1f w/ prior`:`5f w/ prior`) %>% 
+    mutate_at(vars(`2f w/ prior`:`5f w/ prior`), ~ gain(., `1f w/ prior`)) %>% 
+    select(-`1f w/ prior`) %>% 
+    gather(Model, val, -age_bucket_xaxis) %>% 
+    mutate(Model = str_replace(Model, "f w/ prior", "F")) %>% 
+    mutate(label = "Age-partitioned models")
+
+study1 <- 
+    bind_rows(
+    full_results_by_partition,
+    partition_results
+) %>% 
+    mutate(label = factor(label, levels = c("Full models", "Age-partitioned models"))) %>% 
+    ggplot(aes(x = age_bucket_xaxis, y = val, color = Model)) +
+    facet_wrap(~ label, ncol = 1) +
+    geom_point(size = 1.5) +
+    geom_path(aes(group = Model), alpha = 0.3) +
+    scale_y_continuous(labels = scales::percent) +
+    scale_color_manual(values = cols) +
+    labs(x = "Age group (in months)", y = "Gain over 1F") +
+    guides(color = guide_legend(reverse = TRUE)) +
+    langcog::theme_mikabr(base_size = 10) +
+    coord_cartesian(ylim = c(0, 0.115)) +
+    theme(legend.position = "bottom") +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_paper/figures/study1.png", study1, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+# Big Figure
+
+```{r}
+library(modelr)
+source("study2/model-functions.R")
+
+examples <- 
+  read_rds("data-for-paper/study2-2f-mod-exploratory-scores.rds") %>% 
+  filter(baby_id == 2917368) %>% 
+  rename(F1_est = F1, F2_est = F2) %>% 
+  split(.$baby_id) %>%
+  map_df(one_baby_resids)
+
+twopars <- read_rds("data-for-paper/study2-2f-mod-from-survey-pars.rds")
+
+first <- 
+    twopars %>% 
+    select(area, `Factor 2` = a1, `Factor 1` = a2) %>% 
+    gather(var, val, -area) %>% 
+    ggplot(aes(x = val, fill = area)) +
+    ggridges::geom_density_line(alpha = 0.4) +
+    facet_wrap(~ var, ncol = 1, scales = "free_y") +
+    scale_x_continuous(limits = c(-1, 5.5)) +
+    labs(x = "Discrimination", y = "Density", fill = "Milestone Category") +
+    langcog::theme_mikabr() + 
+    langcog::scale_color_solarized() + 
+    theme(axis.text.y=element_blank(), axis.ticks.y=element_blank()) +
+    # scale_fill_manual(values = c("gray", "gray", "gray", "gray")) +
+    NULL
+
+second <- 
+    read_rds("data-for-paper/study2-2f-mod-exploratory-scores.rds") %>% 
+    select(months, `Factor 1` = F1, `Factor 2` = F2) %>% 
+    gather(var, val, -months) %>% 
+    ggplot(aes(x = months, y = val, color = var)) +
+    geom_point(alpha = 0.1) +
+    facet_wrap(~ var, ncol = 1) +
+    labs(x = "Age (in months)", y = "Score") +
+    langcog::theme_mikabr() + 
+    ggthemes::scale_color_solarized() + 
+    geom_smooth(method = "loess", color = "black")
+
+third <- 
+    examples %>% 
+    mutate(baby_id = "Example child's developmental path") %>% 
+  select(baby_id, months, ends_with("est")) %>% 
+  gather(var, val, -baby_id, -months) %>% 
+  ggplot(aes(x = months, y = val, color = var)) +
+  stat_smooth(geom = "line", method = "lm", formula = y ~ poly(x, 2), se = FALSE, alpha = 0.6) +
+    geom_segment(aes(x = 4.06, xend = 4.06, y = -2.92, yend = -2.57), color = "black") +
+  geom_point() +
+  facet_wrap(~ baby_id) +
+  labs(x = "Age (in months)", y = "Score") +
+  langcog::theme_mikabr() +
+    ggthemes::scale_color_solarized() + 
+    scale_x_continuous(breaks = c(0, 6, 12, 18), limits = c(0, 18))
+
+fourth <- 
+    examples %>% 
+    mutate(baby_id = "Example child's developmental deviations") %>% 
+  select(baby_id, months, ends_with("resid")) %>% 
+  gather(var, val, -baby_id, -months) %>% 
+  ggplot(aes(x = months, y = val, color = var)) +
+  # geom_path(alpha = 0.3) +
+  coord_cartesian(y = c(-0.6, 0.6)) +
+    geom_segment(aes(x = 4.06, xend = 4.06, y = 0, yend = -0.348), color = "black") +
+  geom_point() +
+  facet_wrap(~ baby_id) +
+    geom_path(linetype = "dashed", alpha = 0.3) +
+  labs(x = "Age (in months)", y = "Residual") +
+  langcog::theme_mikabr() +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+    ggthemes::scale_color_solarized() + 
+    scale_x_continuous(breaks = c(0, 6, 12, 18), limits = c(0, 18))
+
+library(cowplot)
+
+out <- 
+    ggdraw() +
+	draw_plot(
+	    plot = 
+	        first + 
+	        theme(
+	            legend.position = "none", 
+	            panel.spacing = unit(-0.2, "lines"), 
+	            strip.background = element_blank(),
+	            strip.text.x = element_blank(),
+	            axis.text=element_text(size=8),
+	            axis.title=element_text(size=8),
+	            axis.ticks.length=unit(.05, "cm"),
+	            axis.ticks = element_line(size = 0.5),
+	            plot.title = element_text(size=8)
+	       ) + 
+	        labs(title = "Step 1: Measurement model", y = ""),
+	    x = 0, # x location of inset placement
+		y = 0, # y location of inset placement
+		width = 0.25, # Inset width
+		height = 1, # Inset height
+		scale = 1
+	) +
+    draw_plot(
+	    plot = 
+	        second + 
+	        scale_x_continuous(breaks = c(0, 6, 12, 18), limits = c(0.5, 18)) +
+	        theme(
+	            legend.position = "none", 
+	            panel.spacing = unit(-0.2, "lines"), 
+	            strip.background = element_blank(),
+	            strip.text.x = element_blank(),
+	            axis.text.y=element_blank(), 
+	            axis.ticks.y=element_blank(),
+	            panel.background = element_rect(fill = "transparent"),
+	            plot.background = element_rect(fill = "transparent", color = NA),
+	            axis.text=element_text(size=8),
+	            axis.title=element_text(size=8),
+	            axis.ticks.length=unit(.05, "cm"),
+	            axis.ticks = element_line(size = 0.5),
+	            plot.title = element_text(size=8)
+	       ) + 
+	        labs(title = "Step 2: Estimate factor scores"),
+	    x = 0.25, # x location of inset placement
+		y = 0, # y location of inset placement
+		width = 0.25, # Inset width
+		height = 1, # Inset height
+		scale = 1
+	) +
+    draw_plot(
+	    plot = 
+	        third + 
+	        theme(
+	            legend.position = "none", 
+	            panel.spacing = unit(-0.2, "lines"), 
+	            strip.background = element_blank(),
+	            strip.text.x = element_blank(),
+	            axis.text.y=element_blank(), 
+	            axis.ticks.y=element_blank(),
+	            panel.background = element_rect(fill = "transparent"),
+	            plot.background = element_rect(fill = "transparent", color = NA),
+	            axis.text=element_text(size=8),
+	            axis.title=element_text(size=8),
+	            axis.ticks.length=unit(.05, "cm"),
+	            axis.ticks = element_line(size = 0.5),
+	            plot.title = element_text(size=8)
+	       ) + 
+	        labs(title = "Step 3: Developmental pathways"),
+	    x = 0.5, # x location of inset placement
+		y = 0, # y location of inset placement
+		width = 0.25, # Inset width
+		height = 1, # Inset height
+		scale = 1
+	) +
+    draw_plot(
+	    plot = 
+	        fourth + 
+	        theme(
+	            legend.position = "none", 
+	            panel.spacing = unit(-0.2, "lines"), 
+	            strip.background = element_blank(),
+	            strip.text.x = element_blank(),
+	            axis.text.y=element_blank(), 
+	            axis.ticks.y=element_blank(),
+	            panel.background = element_rect(fill = "transparent"),
+	            plot.background = element_rect(fill = "transparent", color = NA),
+	            axis.text=element_text(size=8),
+	            axis.title=element_text(size=8),
+	            axis.ticks.length=unit(.05, "cm"),
+	            axis.ticks = element_line(size = 0.5),
+	            plot.title = element_text(size=8)
+	       ) + 
+	        labs(title = "Step 4: Measure deviations"),
+	    x = 0.75, # x location of inset placement
+		y = 0, # y location of inset placement
+		width = 0.25, # Inset width
+		height = 1, # Inset height
+		scale = 1
+	) +
+    draw_label("Factor 1", color = "#268bd2", fontface = "bold", size = 8, angle = 90,
+               x = 0.013, y = 0.7) +
+    draw_label("Factor 2", color = "#cb4b16", fontface = "bold", size = 8, angle = 90,
+               x = 0.013, y = 0.35) +
+    
+    draw_label("Physical Milestones", color = "black", size = 6, angle = 0,
+               x = 0.18, y = 0.8) +
+    
+    geom_curve(
+		aes(x = 0.18, y = 0.75, xend = 0.17, yend = 0.61),
+		color = "black",
+		alpha = 0.7,
+		curvature = 0,
+		arrow = arrow(length = unit(0.03, "npc"))
+	) + 
+    
+    draw_label("Linguistic Milestones", color = "black", size = 6, angle = 0,
+               x = 0.18, y = 0.44) +
+    
+    geom_curve(
+		aes(x = 0.18, y = 0.4, xend = 0.17, yend = 0.27),
+		color = "black",
+		alpha = 0.7,
+		curvature = 0,
+		arrow = arrow(length = unit(0.03, "npc"))
+	) + 
+        
+    geom_curve(
+		aes(x = 0.591, y = 0.355, xend = 0.82, yend = 0.42),
+		color = "black",
+		alpha = 0.7,
+		curvature = 0,
+		arrow = arrow(length = unit(0.03, "npc"))
+	)
+
+ggsave(filename = "_paper/figures/bigfigure.png", out, width = 18, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+# Final Figure
+
+```{r}
+source("study2/model-functions.R")
+source("_paper/helpers.R")
+
+results <- read_rds("data-for-paper/study2-models.rds")
+
+left <- model_to_bootstrap_ci(results[[1]]$big_model_f1_f2) %>% mutate(model = "Factor 1 ~ Factor 2")
+
+right <- model_to_bootstrap_ci(results[[1]]$big_model_f2_f1) %>% mutate(model = "Factor 2 ~ Factor 1")
+
+p <- 
+    bind_rows(
+    results[[1]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Exploratory") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows(),
+    results[[2]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Replicate 1") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows(),
+    results[[3]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Replicate 2") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows()
+) %>% 
+    mutate(
+        model = str_remove(model, "big_model_"),
+        model = ifelse(model == "f2_f1", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 2")
+    ) %>%
+    ggplot(aes(x = age, y = coupling)) +
+    
+    geom_ribbon(
+        data = left,
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.1,
+        fill = "red"
+    ) +
+    
+    geom_ribbon(
+        data = right,
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.1,
+        fill = "red"
+    ) + 
+    
+    geom_path(aes(color = name), size = 1) +
+    facet_wrap(~ model, ncol = 2) +
+    labs(x = "Age (in months)", y = "Coupling", color = "Sample") +
+    langcog::theme_mikabr() +
+  coord_cartesian(ylim = c(-0.1, 1), xlim = c(0.7, 19)) +
+    scale_x_continuous(breaks = c(0, 6, 12, 18)) + 
+    langcog::theme_mikabr(base_size = 10) + 
+    langcog::scale_color_solarized() +
+	theme(legend.position = "bottom") +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_paper/figures/study2results.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```

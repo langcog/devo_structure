@@ -1,0 +1,134 @@
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(modelr)
+library(mirt)
+theme_set(theme_gray(base_size = 16))
+set.seed(1)
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+resp <- select(survey, -age)
+
+# triple check alignment
+# all(milestones$short == names(select(survey, -1)))
+```
+
+# All survey data
+
+we've got some outliers
+
+```{r}
+sumscores <- 
+    tibble(
+        age = survey$age,
+        sum = apply(resp, 1, sum)
+    )
+
+sumscores %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age in months", y = "Raw sum score", title = "All kids")
+```
+
+# Filter survey data down to a more trusted sample
+
+```{r}
+keep <- 
+    sumscores$age >= 1 & 
+    sumscores$age <= 24 & 
+    sumscores$sum > (15 + sumscores$age * 8) & 
+    sumscores$sum < (100 + sumscores$age * 14)
+
+sumscores %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age in months", y = "Raw sum score", title = "Cut from 2023 kids to 909 kids") +
+    geom_vline(xintercept = 0.5, color = "blue") +
+    geom_vline(xintercept = 24.5, color = "blue") +
+    geom_segment(x = 0.5, xend = 24.5, y = 0.5 * 8 + 15, yend = 24.5 * 8 + 15, color = "blue") +
+    geom_segment(x = 0.5, xend = 24.5, y = 0.5 * 14 + 100, yend = 24.5 * 14 + 100, color = "blue")
+```
+
+graph again
+
+```{r}
+survey2 <- survey[keep, ]
+sumscores2 <- sumscores[keep, ]
+resp2 <- resp[keep, ]
+
+sumscores2 %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age in months", y = "Raw sum score", title = "Raw sum scores all kids") +
+    geom_smooth(method = "lm", se = FALSE)
+```
+
+# Fit Exploratory 2F Model w/ Prior
+
+```{r}
+n_items <- ncol(resp2)
+
+prior_string <-
+    str_glue(
+        "F1 = 1-{n_items}
+        F2 = 1-{n_items}
+        PRIOR =
+        (1-{n_items}, a1, lnorm, 0, 0.5),
+        (1-{n_items}, a2, lnorm, 0, 0.5),
+        (1-{n_items}, d, norm, 0, 3)"
+    )
+
+surv_mod_2f <- 
+    mirt(
+        resp2,
+        mirt.model(prior_string),
+        method = "EM"
+    )
+surv_mod_2f@Options$exploratory <- TRUE
+
+surv_mod_par <- 
+    coef(surv_mod_2f, simplify = TRUE, rotate = "oblimin")$items %>% 
+    as.data.frame() %>% 
+    rownames_to_column() %>% 
+    as_tibble() %>% 
+    select(-g, -u) %>% 
+    rename(short = rowname) %>% 
+    left_join(milestones %>% select(short, area))
+```
+
+# Score the exploratory sample
+
+```{r}
+samples <- read_csv("data-raw/samples.csv")
+app_data <- read_rds("data-clean/database-timepoints-2-to-18mo-5-each-cat-6tp.rds")
+
+exploratory_data <- app_data %>% filter(baby_id %in% samples$exploratory)
+
+exploratory_scores <- 
+        fscores(
+            surv_mod_2f,
+            method = "EAP",
+            response.pattern = select(exploratory_data, -(1:7)),
+            rotate = "oblimin"
+        )[ , c("F1", "F2")] %>% 
+        as_tibble()
+
+bind_cols(
+    exploratory_data %>% transmute(baby_id, months = min_days / 30.3),
+    exploratory_scores %>% rename(F1 = F2, F2 = F1) # F2 explains more variance so swap names
+) %>% 
+    write_rds("data-for-paper/study2-2f-mod-exploratory-scores.rds")
+```
+
+# Save
+
+```{r}
+surv_mod_2f %>% write_rds("study2/data/surv_mod_2f.rds")
+surv_mod_par %>% write_rds("data-for-paper/study2-2f-mod-from-survey-pars.rds")
+```

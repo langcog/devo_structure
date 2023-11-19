@@ -1,0 +1,49 @@
+---
+title: "data-clean"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+```
+
+get what we really need
+
+```{r}
+database_wide <- read_rds("data-clean/database_sample.rds") %>% select(-(1:7))
+database_ages <- read_rds("data-clean/database_sample.rds") %>% select(1:7)
+areas <- read_csv("data-raw/milestones.csv") %>% mutate(milestone = as.character(milestone))
+survey_wide <- read_csv("data-raw/survey.csv") %>% select(-age)
+```
+
+match columns
+
+```{r}
+milestone_map <-
+    tibble(milestone = names(database_wide)) %>%
+    left_join(areas)
+
+database_wide_fixed <- database_wide
+names(database_wide_fixed) <- milestone_map$short
+
+database_wide_fixed <- database_wide_fixed[ , order(names(database_wide_fixed))]
+database_wide_fixed <- database_wide_fixed[ , names(database_wide_fixed) %in% names(survey_wide)]
+```
+
+check that it worked
+
+```{r}
+all(names(database_wide_fixed) == names(survey_wide))
+milestone_map$short[10]
+database_wide[["15"]][1:100]
+database_wide_fixed[["steps_15"]][1:100]
+```
+
+output 
+
+```{r}
+bind_cols(database_ages, database_wide_fixed) %>% 
+    arrange(baby_id, timepoint) %>% 
+    write_rds("data-clean/database-timepoints.rds")
+```

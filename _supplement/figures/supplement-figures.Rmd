@@ -1,0 +1,240 @@
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(here)
+library(mirt)
+library(knitr)
+library(kableExtra)
+set.seed(1)
+
+theme_set(theme_bw())
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+resp <- select(survey, -age)
+
+source(here("study2/model-functions.R"))
+```
+
+# Kinedu Data
+
+## Filtering
+
+```{r fig1, fig.height = 5, fig.cap = 'The way we filtered for study 2 graph'}
+sumscores <- 
+    tibble(
+        age = survey$age,
+        sum = apply(resp, 1, sum)
+    )
+
+keep <- 
+    sumscores$age >= 1 & 
+    sumscores$age <= 24 & 
+    sumscores$sum > (15 + sumscores$age * 8) & 
+    sumscores$sum < (100 + sumscores$age * 14)
+
+p <- 
+  sumscores %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age (in months)", y = "Milestones completed") +
+    geom_vline(xintercept = 0.5, color = "red") +
+    geom_vline(xintercept = 24.5, color = "red") +
+    geom_segment(x = 0.5, xend = 24.5, y = 0.5 * 8 + 15, yend = 24.5 * 8 + 15, color = "red") +
+    geom_segment(x = 0.5, xend = 24.5, y = 0.5 * 14 + 100, yend = 24.5 * 14 + 100, color = "red") +
+  langcog::theme_mikabr(base_size = 6) + 
+    langcog::scale_color_solarized() +
+	theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = c(0, 12, 24, 36, 48, 55, 60)) +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_supplement/figures/01.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+## Yields
+
+```{r fig2, fig.height = 5, fig.cap = 'The way we filtered for study 2 graph'}
+survey2 <- survey[keep, ]
+sumscores2 <- sumscores[keep, ]
+resp2 <- resp[keep, ]
+
+p <- 
+    sumscores2 %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age (in months)", y = "Milestones completed") +
+    geom_smooth(method = "lm", se = FALSE) +
+  langcog::theme_mikabr(base_size = 6) + 
+    langcog::scale_color_solarized() +
+	theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = c(0, 6, 12, 18, 24)) +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_supplement/figures/02.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+## Breakdown by milestone category
+
+```{r fig3, fig.height = 5, fig.cap = 'The way we filtered for study 2 graph'}
+p <- 
+  survey2 %>% 
+    gather(var, val, -baby_id, -age) %>% 
+    left_join(milestones %>% select(var = paste, area)) %>% 
+    mutate(area = ifelse(area == "Social & Emotional", "Social-emotional", area)) %>% 
+    group_by(baby_id, age, area) %>% 
+    summarize(sum_score = sum(val)) %>% 
+    ungroup() %>% 
+    ggplot(aes(x = age, y = sum_score, color = area)) +
+    geom_point(alpha = 0.1) +
+    facet_wrap(~ area, scales = "free") +
+    labs(x = "Age (in months)", y = "Milestones completed", title = "") +
+    guides(color = FALSE) +
+    geom_smooth(method = "lm", color = "black") +
+  langcog::theme_mikabr(base_size = 6) + 
+    langcog::scale_color_solarized() +
+	theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = c(0, 6, 12, 18, 24)) +
+    theme(legend.title = element_text(size = 8), legend.text = element_text(size= 8),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_supplement/figures/03.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+# 3F longitudinal differentiation 
+
+```{r}
+results <- read_rds(here("data-for-paper/si-models.rds"))
+source(here("_paper/helpers.R"))
+
+# calculate bootstrap intervals
+a <- model_to_bootstrap_ci(results[[1]]$big_model_f1_f2) %>% mutate(model = "Factor 1 ~ Factor 2")
+b <- model_to_bootstrap_ci(results[[1]]$big_model_f1_f3) %>% mutate(model = "Factor 1 ~ Factor 3")
+c <- model_to_bootstrap_ci(results[[1]]$big_model_f2_f1) %>% mutate(model = "Factor 2 ~ Factor 1")
+d <- model_to_bootstrap_ci(results[[1]]$big_model_f2_f3) %>% mutate(model = "Factor 2 ~ Factor 3")
+e <- model_to_bootstrap_ci(results[[1]]$big_model_f3_f1) %>% mutate(model = "Factor 3 ~ Factor 1")
+f <- model_to_bootstrap_ci(results[[1]]$big_model_f3_f2) %>% mutate(model = "Factor 3 ~ Factor 2")
+
+# graph
+p <- bind_rows(
+    results[[1]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Exploratory") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows(),
+    results[[2]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Replicate 1") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows(),
+    results[[3]] %>% map(clean_coef) %>% map(coef_df_to_grid, "Replicate 2") %>% imap(~ mutate(.x, model = .y)) %>% bind_rows()
+) %>% 
+    mutate(model = str_remove(model, "big_model_")) %>%
+    mutate(
+        model = 
+            case_when(
+                model == "f1_f2" ~ "Factor 1 ~ Factor 2",
+                model == "f2_f1" ~ "Factor 2 ~ Factor 1",
+                model == "f1_f3" ~ "Factor 1 ~ Factor 3",
+                model == "f3_f1" ~ "Factor 3 ~ Factor 1",
+                model == "f2_f3" ~ "Factor 2 ~ Factor 3",
+                model == "f3_f2" ~ "Factor 3 ~ Factor 2"
+            ) %>% 
+            factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))
+    ) %>% 
+    ggplot(aes(x = age, y = coupling)) +
+    geom_path(size = 0.5, aes(color = name)) +
+    labs(x = "Age (in months)", y = "Coupling", color = "Sample") +
+    coord_cartesian(ylim = c(-0.4, 1)) +
+    geom_ribbon(
+        data = a %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) +
+    geom_ribbon(
+        data = b %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) +
+    geom_ribbon(
+        data = c %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) + 
+    geom_ribbon(
+        data = d %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) + 
+    geom_ribbon(
+        data = e %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) + 
+    geom_ribbon(
+        data = f %>% mutate(model = model %>% factor(levels = c("Factor 1 ~ Factor 2", "Factor 2 ~ Factor 1", "Factor 1 ~ Factor 3", "Factor 3 ~ Factor 1", "Factor 2 ~ Factor 3", "Factor 3 ~ Factor 2"))),
+        aes(x = age, ymin = low, ymax = high, y = 0),
+        alpha = 0.15,
+        fill = "red"
+    ) +
+  facet_wrap(~ model, ncol = 2) +
+  langcog::theme_mikabr(base_size = 6) + 
+	theme(legend.position = "bottom") +
+    scale_x_continuous(breaks = c(0, 6, 12, 18)) +
+    theme(legend.title = element_text(size = 4), legend.text = element_text(size= 4),legend.key.size = unit(0.3, "cm"),
+          legend.margin=margin(c(-5,5,-5,5)))
+
+ggsave(filename = "_supplement/figures/04.png", p, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(modelr)
+library(mirt)
+library(lubridate)
+set.seed(1)
+source("study2/model-functions.R")
+
+samples <- read_csv("data-raw/samples.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+surv_mod_2f <- read_rds("study2/data/surv_mod_2f.rds")
+
+app_data <- read_rds("data-clean/database-timepoints-2-to-18mo-5-each-cat-6tp.rds")
+
+names(app_data)
+
+tmp <- 
+    app_data %>% 
+    filter(baby_id %in% unlist(samples)) %>% 
+    select(baby_id, timepoint, min_days, abs_12:words_702) %>% 
+    gather(var, val, -baby_id, -min_days, -timepoint) %>% 
+    na.omit()
+
+tmp2 <- 
+    tmp %>% 
+    group_by(baby_id, timepoint) %>% 
+    summarize(
+        months = min_days[1] / 30.3,
+        p = mean(val)
+    ) %>% 
+    ungroup()
+
+theplot <- 
+    tmp2 %>% 
+    ggplot(aes(x = months, y = p)) +
+    geom_point(alpha = 0.05) +
+    labs(x = "Age (in months)", y = "Percent of milestones responded to reached") +
+  langcog::theme_mikabr(base_size = 7) +
+    langcog::scale_color_solarized()
+
+ggsave(filename = "_supplement/figures/rawp.png", theplot, width = 9, height = 6, dpi = 1000, units = "cm", device='png', scale = 1)
+```

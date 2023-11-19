@@ -1,0 +1,74 @@
+---
+title: "two replicates"
+output: pdf_document
+---
+
+```{r}
+library(tidyverse)
+library(lme4)
+library(modelr)
+library(mirt)
+library(lubridate)
+set.seed(1)
+source("_supplement/3f/model-functions.R")
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+surv_mod_3f <- read_rds("_supplement/3f/01-surv_mod_3f.rds")
+
+samples <- read_csv("data-raw/samples.csv")
+
+app_data <- read_rds("data-clean/database-timepoints-2-to-18mo-5-each-cat-6tp.rds")
+```
+
+function that takes a bunch of baby ids and produces both models
+
+```{r}
+replicate_batch <- function(batch_babies){
+    batch <- 
+        app_data %>% 
+        filter(baby_id %in% batch_babies)
+
+    scores <- 
+        fscores(
+            surv_mod_3f,
+            method = "EAP",
+            response.pattern = select(batch, -(1:7)),
+            rotate = "oblimin"
+        )[ , c("F1", "F2", "F3")] %>% 
+        as_tibble()
+    
+    final <- 
+        select(batch, 1:7) %>% 
+        mutate(months = min_days / 30.3) %>% 
+        select(baby_id, timepoint, months) %>% 
+        bind_cols(scores %>% select(F1 = F3, F2, F3 = F1)) # reorder factors by prop var
+
+    ages <- final %>% select(1:3)
+    fscores_est <- final %>% select(F1_est = F1, F2_est = F2, F3_est = F3)
+    
+    fscores <-
+        fscores_est %>%
+        bind_cols(ages, .) %>%
+        split(.$baby_id) %>%
+        map_df(one_baby_resids) %>% 
+        filter(abs(F1_resid) < 1.5, abs(F2_resid) < 1.5, abs(F3_resid) < 1.5)
+
+    models <- nilam_method(fscores)
+    
+    models
+}
+```
+
+list of baby ids to iterate it through
+
+```{r}
+results <- samples %>% map(replicate_batch)
+
+results %>% write_rds("data-for-paper/si-models.rds")
+```

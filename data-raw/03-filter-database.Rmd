@@ -1,0 +1,55 @@
+---
+title: "get-young"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+database_timepoints <- read_rds("data-clean/database-timepoints.rds")
+survey <- read_csv("data-raw/survey.csv")
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+```
+
+limit to 18 months
+
+```{r}
+database_timepoints_young <- 
+    database_timepoints %>% 
+    filter(min_days / 30.3 > 2, min_days / 30.3 < 18) %>% 
+    group_by(baby_id) %>% 
+    filter(n() >= 6) %>% 
+    mutate(timepoint = as.numeric(as.factor(timepoint))) %>% 
+    ungroup()
+```
+
+require at least 5 milestones in each category
+
+```{r}
+kids_to_keep <- 
+    database_timepoints_young %>% 
+    select(-birthday, -min_days, -max_days, -min_date, -max_date) %>% 
+    gather(var, val, -baby_id, -timepoint) %>% 
+    na.omit() %>% 
+    left_join(milestones %>% select(var = short, area)) %>% 
+    count(baby_id, timepoint, area) %>%
+    group_by(baby_id, timepoint) %>% 
+    filter(min(n) >= 5, n() == 4) %>% 
+    ungroup() %>% 
+    distinct(baby_id, timepoint)
+
+database_timepoints_young_atleast <- 
+    database_timepoints_young %>% 
+    semi_join(kids_to_keep) %>% 
+    group_by(baby_id) %>% 
+    filter(n() >= 6) %>% 
+    mutate(timepoint = as.numeric(as.factor(timepoint))) %>% 
+    ungroup()
+
+# output
+database_timepoints_young_atleast %>%
+    write_rds("data-clean/database-timepoints-2-to-18mo-5-each-cat-6tp.rds")
+```

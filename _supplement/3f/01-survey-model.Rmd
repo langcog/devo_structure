@@ -1,0 +1,84 @@
+---
+title: "survey model"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(modelr)
+library(mirt)
+theme_set(theme_gray(base_size = 16))
+set.seed(1)
+
+survey <- read_csv("data-raw/survey.csv")
+
+milestones <- 
+    read_csv("data-raw/milestones.csv") %>% 
+    filter(short %in% names(survey)) %>% 
+    arrange(short)
+
+resp <- select(survey, -age)
+
+# check
+# all(milestones$paste == names(select(survey, -1, -2)))
+```
+
+# All survey data
+
+remove outliers
+
+```{r}
+sumscores <- 
+    tibble(
+        age = survey$age,
+        sum = apply(resp, 1, sum)
+    )
+
+sumscores %>% 
+    ggplot(aes(x = age, y = sum)) + 
+    geom_point(alpha = 0.25) +
+    labs(x = "Age in months", y = "Raw sum score", title = "All kids")
+```
+
+Filter down
+
+```{r}
+keep <- 
+    sumscores$age >= 1 & 
+    sumscores$age <= 24 & 
+    sumscores$sum > (15 + sumscores$age * 8) & 
+    sumscores$sum < (100 + sumscores$age * 14)
+
+survey2 <- survey[keep, ]
+sumscores2 <- sumscores[keep, ]
+resp2 <- resp[keep, ]
+```
+
+# Fit Exploratory 3F Model
+
+```{r}
+n_items <- ncol(resp2)
+
+prior_string <-
+    str_glue(
+        "F1 = 1-{n_items}
+        F2 = 1-{n_items}
+        F3 = 1-{n_items}
+        PRIOR =
+        (1-{n_items}, a1, lnorm, 0, 0.5),
+        (1-{n_items}, a2, lnorm, 0, 0.5),
+        (1-{n_items}, a3, lnorm, 0, 0.5),
+        (1-{n_items}, d, norm, 0, 3)"
+    )
+
+surv_mod_3f <- 
+    mirt(
+        resp2,
+        mirt.model(prior_string),
+        method = "EM"
+    )
+surv_mod_3f@Options$exploratory <- TRUE
+
+surv_mod_3f %>% write_rds("_supplement/3f/01-surv_mod_3f.rds")
+```
